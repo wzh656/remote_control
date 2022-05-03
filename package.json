@@ -1,0 +1,26 @@
+{
+  "name": "remote_control",
+  "version": "1.0.0",
+  "description": "远程控制系统",
+  "main": "index.js",
+  "scripts": {
+    "test": "electron .",
+    "pack-64": "stop.vbs&electron-packager . RemoteControl --platform=win32 --arch=x64 --out=./out --asar --icon=./icon.png --app-version=1.0.0 --overwrite --ignore=robot --ignore=startup.vbs --ignore=stop.vbs --ignore=config.json --ignore=uninstall.bat --ignore=uninstall.vbs --ignore=icon.png --electron-version 11.0.3 --registry=https://registry.npm.taobao.org/&npm run copy-64",
+    "pack-32": "stop.vbs&electron-packager . RemoteControl --platform=win32 --arch=ia32 --out=./out --asar --icon=./icon.png --app-version=1.0.0 --overwrite --ignore=robot --ignore=startup.vbs --ignore=stop.vbs --ignore=config.json --ignore=uninstall.bat --ignore=uninstall.vbs --ignore=icon.png --electron-version 11.0.3 --registry=https://registry.npm.taobao.org/&npm run copy-32",
+    "copy-64": "copy config.json out\\RemoteControl-win32-x64\\resources\\config.json&copy startup.vbs out\\RemoteControl-win32-x64\\resources\\startup.vbs&xcopy robot out\\RemoteControl-win32-x64\\resources\\robot /E /I",
+    "copy-32": "copy config.json out\\RemoteControl-win32-ia32\\resources\\config.json&copy startup.vbs out\\RemoteControl-win32-ia32\\resources\\startup.vbs&xcopy robot out\\RemoteControl-win32-ia32\\resources\\robot /E /I"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wzh656/remote_control"
+  },
+  "keywords": [
+    "control",
+    "remote"
+  ],
+  "author": "wzh656",
+  "license": "GPL-3.0",
+  "dependencies": {
+    "electron-rebuild": "^3.2.7"
+  }
+}

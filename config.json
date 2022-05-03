@@ -1,0 +1,9 @@
+{
+	"name": "班上电脑",
+	"startup": true,
+	"tray": {
+		"display": true,
+		"exit": true
+	},
+	"local_path": "D:\\www\\www\\local_path"
+}
