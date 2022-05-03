@@ -68,6 +68,102 @@ function send(name, ...data){
 	socket.emit(name, ...data);
 };
 
+
+
+//运行命令 .cmd
+let commandsCallback = ()=>{};
+function runCommands(code){
+	return new Promise((resolve, reject)=>{
+		ipcRenderer.send("commands", code);
+		commandsCallback = resolve;
+	});
+}
+
+
+//运行Javascript .js
+let elecReadfileCallback = ()=>{};
+let elecDownloadCallback = ()=>{};
+function runJs(code){
+	return new Promise((resolve, reject)=>{
+		if (code.substr(0,8) == "request "){
+			const args = code.split(" "); //网址 dataType
+			$.get(args[1], function(data, status, xhr){
+				resolve( JSON.stringify(data) );
+			}, args[2]);
+
+		}else if (code.substr(0,7) == "upload "){
+			const args = code.split(" "); //本地位置 服务器位置
+			ipcRenderer.send("readfile", args[1]);
+			elecReadfileCallback = function(data){
+				$.post("https://wzh.glitch.me/data/writeFile", {
+					path: "RemoteControl/upload/" + args[2],
+					value: data
+				}, function(body, status, xhr){
+					resolve(JSON.stringify(body), data);
+				});
+				//resolve(data);
+			};
+			
+
+		}else if (code.substr(0,16) == "bilibili_search "){
+			const args = code.split(" "); //keyword
+			$.get(`https://api.bilibili.com/x/web-interface/search/type?keyword=${encodeURIComponent(args[1])}&search_type=video`, function(data, status, xhr){
+				resolve( JSON.stringify(data) );
+			}, args[2]);
+
+		}else if (code.substr(0,18) == "bilibili_download "){
+			const args = code.split(" "); //BVid path
+			$.get(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(args[1])}`, function(data, status, xhr){
+				if (status != "success")
+					return resolve( JSON.stringify(data) );
+
+				const cid = data?.data?.cid;
+				if (cid != undefined){
+					$.get(`https://api.bilibili.com/x/player/playurl?bvid=${encodeURIComponent(args[1])}&cid=${encodeURIComponent(cid)}`, function(data, status, xhr){
+						const url = data?.data?.durl?.[0]?.url;
+						ipcRenderer.send("download", url, args[2]);
+						elecDownloadCallback = resolve;
+					});
+
+				}else{
+					return resolve( JSON.stringify(data) );
+				}
+			}, args[2]);
+
+		}else if (code.substr(0,7) == "speech "){
+			const audio = new Audio("https://api.vvhan.com/api/song?txt=" + encodeURIComponent(code.substr(7)) );
+			audio.play();
+			resolve( JSON.stringify(audio) );
+
+		}else if (code.substr(0,6) == "piano "){
+			const info = code.split("\n")[0].split(" "); //拍数
+			const music = new Music(code.split("\n").slice(1).join("\n"), 6, +info[1]).play();
+			resolve( JSON.stringify(music) );
+
+		}else{
+			let result;
+			try{
+				result = JSON.stringify(eval(code));
+			}catch(err){
+				result = err;
+			}
+			resolve( result );
+		}
+	});
+}
+
+
+//运行Electron .elec
+let electronCallback = ()=>{};
+function runElectron(code){
+	return new Promise((resolve, reject)=>{
+		ipcRenderer.send("electron", code);
+		electronCallback = resolve;
+	});
+}
+
+
+
 if (typeof io == "undefined"){ //未加载socket.io.js
 	$(".state").html("网络错误，请检查网络连接再刷新页面！")
 		.removeClass().addClass("state failed");
@@ -137,93 +233,58 @@ if (typeof io == "undefined"){ //未加载socket.io.js
 		$(".state").html("你的分配ID：" + ID + "（"+ NAME +"）");
 	});
 
-	//命令
-	socket.on("remote_commands", function(commands, id){
-		console.log("↓ remote_commands", commands, id)
+	//Commands .cmd
+	socket.on("remote_commands", function(code, id){
+		console.log("↓ remote_commands", code, id)
 		controllerID = id;
-		ipcRenderer.send("commands", commands);
-	});
-
-	//html命令
-	socket.on("remote_javascript", function(js, id){
-		console.log("↓ remote_javascript", js, id)
-		controllerID = id;
-		if (js.substr(0,8) == "request "){
-			const args = js.split(" "); //网址 dataType
-			$.get(args[1], function(data, status, xhr){
-				send("remote_output", id, JSON.stringify(data));
-			}, args[2]);
-
-		}else if (js.substr(0,7) == "upload "){
-			const args = js.split(" "); //本地位置 服务器位置
-			ipcRenderer.send("readfile", args[1], args[2]);
-
-		}else if (js.substr(0,16) == "bilibili_search "){
-			const args = js.split(" "); //keyword
-			$.get(`https://api.bilibili.com/x/web-interface/search/type?keyword=${encodeURIComponent(args[1])}&search_type=video`, function(data, status, xhr){
-				send("remote_output", id, JSON.stringify(data));
-			}, args[2]);
-
-		}else if (js.substr(0,18) == "bilibili_download "){
-			const args = js.split(" "); //BVid path
-			$.get(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(args[1])}`, function(data, status, xhr){
-				if (status != "success")
-					return send("remote_output", id, JSON.stringify(data));
-
-				const cid = data?.data?.cid;
-				if (cid != undefined){
-					$.get(`https://api.bilibili.com/x/player/playurl?bvid=${encodeURIComponent(args[1])}&cid=${encodeURIComponent(cid)}`, function(data, status, xhr){
-						const url = data?.data?.durl?.[0]?.url;
-						ipcRenderer.send("electron", `download ${url} ${args[2]}`);
-					});
-
-				}else{
-					return send("remote_output", id, JSON.stringify(data));
-				}
-			}, args[2]);
-
-		}else if (js.substr(0,7) == "speech "){
-			const audio = new Audio("https://api.vvhan.com/api/song?txt=" + encodeURIComponent(js.substr(7)) );
-			audio.play();
-			send("remote_output", id, JSON.stringify(audio));
-
-		}else if (js.substr(0,6) == "piano "){
-			const info = js.split("\n")[0].split(" "); //拍数
-			const music = new Music(js.split("\n").slice(1).join("\n"), 6, +info[1]).play();
-			send("remote_output", id, JSON.stringify(music));
-
-		}else{
-			let result;
-			try{
-				result = JSON.stringify(eval(js));
-			}catch(err){
-				result = err;
-			}
-			send("remote_output", id, result);
-		}
-	});
-
-	//electron命令
-	socket.on("remote_electron", function(js, id){
-		console.log("↓ remote_electron", js, id)
-		controllerID = id;
-		ipcRenderer.send("electron", js);
-	});
-
-	//readfile输出
-	ipcRenderer.on("readfile_output", function(event, data, path){
-		send("remote_output", controllerID, data);
-		$.post("https://wzh.glitch.me/data/writeFile", {
-			path: "RemoteControl/upload/" + path,
-			value: data
-		}, function(body, status, xhr){
-			send("remote_output", controllerID, body);
+		runCommands(code).then((...data)=>{
+			send("remote_output", controllerID, ...data);
 		});
 	});
 
-	//输出
+	//Javascript .js
+	socket.on("remote_javascript", function(code, id){
+		console.log("↓ remote_javascript", code, id)
+		controllerID = id;
+		runJs(code).then((...data)=>{
+			send("remote_output", controllerID, ...data);
+		});
+	});
+
+	//Electron .elec
+	socket.on("remote_electron", function(code, id){
+		console.log("↓ remote_electron", code, id)
+		controllerID = id;
+		runElectron(code).then((...data)=>{
+			send("remote_output", controllerID, ...data);
+		});
+	});
+
+	//electron 请求运行 js
+	ipcRenderer.on("javascript", function(event, code){
+		runJs(code).then((...data)=>{
+			ipcRenderer.send("javascript_output", ...data);
+		});
+	});
+
+	//readfile输出
+	ipcRenderer.on("readfile_output", function(event, data){
+		elecReadfileCallback(data);
+	});
+
+	//download输出
+	ipcRenderer.on("download_output", function(event, data){
+		elecDownloadCallback(data);
+	});
+
+	//electron输出
+	ipcRenderer.on("electron_output", function(event, data){
+		electronCallback(data);
+	});
+
+	//commands输出
 	ipcRenderer.on("commands_output", function(event, data){
-		send("remote_output", controllerID, data);
+		commandsCallback(data);
 	});
 }
 

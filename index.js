@@ -17,6 +17,122 @@ const CONFIG = JSON.parse(
 	fs.readFileSync( path.join(__dirname, "../config.json"), "utf-8" )
 ); //配置文件
 
+
+
+//fs新增函数 递归创建目录
+fs.mkdirsSync = function(dirname){
+	if (fs.existsSync(dirname)) return; //已存在
+	fs.mkdirsSync(path.dirname(dirname)); //递归创建上层目录
+	fs.mkdirSync(dirname); //创建本层目录
+};
+
+
+
+//运行命令 .cmd
+function runCommands(code, isPath=false){
+	return new Promise((resolve, reject)=>{
+		if (isPath){ //已有文件
+			execFile(path.join(__dirname, "../robot/node.exe"), [path.join(__dirname, "../robot/robot.js"), "file", code], function(err, stdout, stderr){
+				resolve( stdout );
+			});
+
+		}else{ //无文件
+			const name = +new Date() + ".txt";
+			const file = path.join(__dirname, "../robot", name);
+			fs.writeFileSync(file, code);
+			execFile(path.join(__dirname, "../robot/node.exe"), [path.join(__dirname, "../robot/robot.js"), "file", file], function(err, stdout, stderr){
+				resolve( stdout );
+				fs.unlinkSync(file); //删除文件
+			});
+		}
+		
+		/*const dir = process.env.ProgramData + "\\robot\\input";
+		const name = +new Date() + ".txt";
+		if ( !fs.existsSync(dir) )
+			fs.mkdirSync( dir );
+		fs.writeFileSync(path.join(dir, name), data); //input
+
+		const id = setInterval(()=>{
+			const file = process.env.ProgramData + "\\robot\\output\\" + name;
+			if ( !fs.existsSync(file) )
+				return;
+			setTimeout(()=>{
+				const output = fs.readFileSync(file, "utf-8");
+				console.log("output:", output.substr(0,100))
+				event.sender.send("commands_output", output);
+				console.log(file)
+				fs.unlinkSync(file); //删除文件 （等到写完后）
+			}, 300);
+			clearInterval(id);
+		}, 0);*/
+	});
+}
+
+
+//运行Electron .elec
+function runElectron(code){
+	return new Promise((resolve, reject)=>{
+		if (code.substr(0,5) == "open "){
+			const args = code.split(" "); //url width height fullscreen
+			newWindows.push( new BrowserWindow({
+				width: args[2] || 800,
+				height: args[3] || 600,
+				fullscreen: args[4]=="true",
+				icon: "window.ico",
+				autoHideMenuBar: true, //隐藏菜单
+				webPreferences: {
+					nodeIntegration: true,
+					nodeIntegrationInWorker: true,
+					contextIsolation: false
+				}
+			}).loadURL(args[1]) );
+			resolve( JSON.stringify(newWindows) );
+
+		}else if (code == "closeall"){
+			newWindows.forEach(win => {try{
+				win.close();
+			}catch(err){
+				resolve( JSON.stringify(err) );
+			}});
+			resolve( JSON.stringify(newWindows) );
+
+		}else if(code.substr(0,9) == "download "){
+			const args = code.split(" "); //url path
+			const req = request({
+				method: "GET",
+				uri: args[1]
+			});
+			const out = fs.createWriteStream(args[2]);
+			req.pipe(out);
+			req.on("end", function(){
+				resolve(true);
+			});
+
+		}else{
+			let result;
+			try{
+				result = JSON.stringify(eval(code));
+			}catch(err){
+				result = err;
+			}
+			resolve(result);
+		}
+	});
+	
+}
+
+
+//运行Javascript .js
+let javascriptCallback = ()=>{};
+function runJs(code){
+	return new Promise((resolve, reject)=>{
+		event.sender.send("javascript", code);
+		javascriptCallback = resolve;
+	});
+}
+
+
+
 function createWindow(){
 	// 创建浏览器窗口
 	win = new BrowserWindow({
@@ -58,6 +174,7 @@ function createWindow(){
 				}
 			};
 		}
+
 		if (CONFIG.tray.exit){ //true
 			label_exit = {
 				label: "Exit",
@@ -109,7 +226,7 @@ function createWindow(){
 		});
 	}
 
-	/*//文件运行
+	/*//robot.exe 文件运行
 	execFile(path.join(__dirname, "robot.exe"), [], function(err, stdout, stderr){
 		if (err) console.error(err);
 	});*/
@@ -120,87 +237,83 @@ function createWindow(){
 	});
 
 	//upload获取文件
-	ipcMain.on("readfile", function(event, path, arg){
+	ipcMain.on("readfile", function(event, path){
 		const result = fs.readFileSync(path).toString();
-		event.sender.send("readfile_output", result, arg);
+		event.sender.send("readfile_output", result);
 	});
 
-	//electron命令
-	ipcMain.on("electron", function(event, code){
-		if (code.substr(0,5) == "open "){
-			const args = code.split(" "); //url width height fullscreen
-			newWindows.push( new BrowserWindow({
-				width: args[2] || 800,
-				height: args[3] || 600,
-				fullscreen: args[4]=="true",
-				icon: "window.ico",
-				autoHideMenuBar: true, //隐藏菜单
-				webPreferences: {
-					nodeIntegration: true,
-					nodeIntegrationInWorker: true,
-					contextIsolation: false
-				}
-			}).loadURL(args[1]) );
-			event.sender.send("commands_output", JSON.stringify(newWindows));
-
-		}else if (code == "closeall"){
-			newWindows.forEach(win => win.close());
-			event.sender.send("commands_output", JSON.stringify(newWindows));
-
-		}else if(code.substr(0,9) == "download "){
-			const args = code.split(" "); //url path
-			const req = request({
-				method: "GET",
-				uri: args[1]
-			});
-			const out = fs.createWriteStream(args[2]);
-			req.pipe(out);
-			req.on("end", function(){
-				event.sender.send("commands_output", true);
-			});
-
-		}else{
-			let result;
-			try{
-				result = JSON.stringify(eval(code));
-			}catch(err){
-				result = err;
-			}
-			event.sender.send("commands_output", result);
-		}
-	});
-
-	//执行命令
-	ipcMain.on("commands", function(event, data){
-		console.log("commands", data)
-
-		const name = +new Date() + ".txt";
-		const file = path.join(__dirname, "../robot", name);
-		fs.writeFileSync(file, data);
-		execFile(path.join(__dirname, "../robot/node.exe"), [path.join(__dirname, "../robot/robot.js"), "file", file], function(err, stdout, stderr){
-			event.sender.send("commands_output", stdout);
-			fs.unlinkSync(file); //删除文件
+	//download
+	ipcMain.on("download", function(event, url, path){
+		const req = request({
+			method: "GET",
+			uri: url
 		});
-		/*const dir = process.env.ProgramData + "\\robot\\input";
-		const name = +new Date() + ".txt";
-		if ( !fs.existsSync(dir) )
-			fs.mkdirSync( dir );
-		fs.writeFileSync(path.join(dir, name), data); //input
-
-		const id = setInterval(()=>{
-			const file = process.env.ProgramData + "\\robot\\output\\" + name;
-			if ( !fs.existsSync(file) )
-				return;
-			setTimeout(()=>{
-				const output = fs.readFileSync(file, "utf-8");
-				console.log("output:", output.substr(0,100))
-				event.sender.send("commands_output", output);
-				console.log(file)
-				fs.unlinkSync(file); //删除文件 （等到写完后）
-			}, 300);
-			clearInterval(id);
-		}, 0);*/
+		const out = fs.createWriteStream(path);
+		req.pipe(out);
+		req.on("end", function(){
+			event.sender.send("download_output", true);
+		});
 	});
+
+	//运行Electron .elec
+	ipcMain.on("electron", function(event, code){
+		runElectron(code).then((...data)=>{
+			event.sender.send("electron_output", ...data);
+		});
+	});
+
+	//运行Commands .cmd
+	ipcMain.on("commands", function(event, code){
+		runCommands(code).then((...data)=>{
+			event.sender.send("commands_output", ...data);
+		});
+	});
+
+	//运行Javascript输出
+	ipcMain.on("javascript_output", function(event, ...data){
+		javascriptCallback(...data);
+	});
+
+	/* 本地控制 */
+	if (CONFIG.local_path){
+		const INPUT = path.join(CONFIG.local_path, "input");
+		const OUTPUT = path.join(CONFIG.local_path, "output");
+		setInterval(function(){
+			if ( !fs.existsSync(INPUT) ) //不存在
+				fs.mkdirsSync(INPUT);
+			if ( !fs.existsSync(OUTPUT) ) //不存在
+				fs.mkdirsSync(OUTPUT);
+
+			const files = fs.readdirSync(INPUT).sort(); //所有文件
+			if (files.length)
+				console.log(files)
+
+			for (const name of files){
+				const type = name.split(".").slice(-1)[0]; //后缀类型
+				const file = path.join(INPUT, name);
+				switch (type){
+					case "cmd":
+						runCommands(file, true).then((...data)=>{
+							fs.writeFileSync(path.join(OUTPUT, name+".cb"), JSON.stringify(data));
+						});
+						break;
+					case "js":
+						runJs( fs.readFileSync(file).toString() ).then((...data)=>{
+							fs.writeFileSync(path.join(OUTPUT, name+".cb"), JSON.stringify(data));
+						});
+						break;
+					case "elec":
+						runElectron( fs.readFileSync(file).toString() ).then((...data)=>{
+							fs.writeFileSync(path.join(OUTPUT, name+".cb"), JSON.stringify(data));
+						});
+						break;
+					default:
+						fs.writeFileSync(path.join(OUTPUT, name+".cb"), "Invalid Type: " + type);
+				}
+				fs.unlinkSync(file); //用完即删
+			};
+		}, 0);
+	}
 
 	//关闭窗口
 	win.on("closed", () => {
