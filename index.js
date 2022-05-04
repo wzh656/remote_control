@@ -8,6 +8,7 @@ const {
 const {exec, execFile} = require("child_process"); //命令
 const fs = require("fs"); //文件处理
 const path = require("path"); //路径处理
+// const request = require("request"); //发送请求
 
 let win; // 保存窗口对象的全局引用, 如果不这样做, 当JavaScript对象被当做垃圾回收时，window窗口会自动关闭
 let newWindows = []; //新建的窗口
@@ -29,22 +30,15 @@ fs.mkdirsSync = function(dirname){
 
 
 //运行命令 .cmd
-function runCommands(code, isPath=false){
+function runCommands(code){
 	return new Promise((resolve, reject)=>{
-		if (isPath){ //已有文件
-			execFile(path.join(__dirname, "../robot/node.exe"), [path.join(__dirname, "../robot/robot.js"), "file", code], function(err, stdout, stderr){
-				resolve( stdout );
-			});
-
-		}else{ //无文件
-			const name = +new Date() + ".txt";
-			const file = path.join(__dirname, "../robot", name);
-			fs.writeFileSync(file, code);
-			execFile(path.join(__dirname, "../robot/node.exe"), [path.join(__dirname, "../robot/robot.js"), "file", file], function(err, stdout, stderr){
-				resolve( stdout );
-				fs.unlinkSync(file); //删除文件
-			});
-		}
+		const name = +new Date() + ".txt";
+		const file = path.join(__dirname, "../robot", name);
+		fs.writeFileSync(file, code);
+		execFile(path.join(__dirname, "../robot/node.exe"), [path.join(__dirname, "../robot/robot.js"), "file", file], function(err, stdout, stderr){
+			resolve( stdout );
+			fs.unlinkSync(file); //删除文件
+		});
 		
 		/*const dir = process.env.ProgramData + "\\robot\\input";
 		const name = +new Date() + ".txt";
@@ -126,7 +120,7 @@ function runElectron(code){
 let javascriptCallback = ()=>{};
 function runJs(code){
 	return new Promise((resolve, reject)=>{
-		event.sender.send("javascript", code);
+		win.webContents.send("javascript", code);
 		javascriptCallback = resolve;
 	});
 }
@@ -243,10 +237,11 @@ function createWindow(){
 	});
 
 	//download
-	ipcMain.on("download", function(event, url, path){
+	ipcMain.on("download", function(event, url, path, referer){
 		const req = request({
 			method: "GET",
-			uri: url
+			uri: url,
+			referer
 		});
 		const out = fs.createWriteStream(path);
 		req.pipe(out);
@@ -278,22 +273,23 @@ function createWindow(){
 	if (CONFIG.local_path){
 		const INPUT = path.join(CONFIG.local_path, "input");
 		const OUTPUT = path.join(CONFIG.local_path, "output");
+
 		setInterval(function(){
 			if ( !fs.existsSync(INPUT) ) //不存在
 				fs.mkdirsSync(INPUT);
 			if ( !fs.existsSync(OUTPUT) ) //不存在
 				fs.mkdirsSync(OUTPUT);
 
-			const files = fs.readdirSync(INPUT).sort(); //所有文件
-			if (files.length)
-				console.log(files)
+			const inputs = fs.readdirSync(INPUT).sort(); //所有输入
+			if (inputs.length)
+				console.log(inputs)
 
-			for (const name of files){
+			for (const name of inputs){
 				const type = name.split(".").slice(-1)[0]; //后缀类型
 				const file = path.join(INPUT, name);
 				switch (type){
 					case "cmd":
-						runCommands(file, true).then((...data)=>{
+						runCommands( fs.readFileSync(file).toString() ).then((...data)=>{
 							fs.writeFileSync(path.join(OUTPUT, name+".cb"), JSON.stringify(data));
 						});
 						break;
@@ -313,6 +309,23 @@ function createWindow(){
 				fs.unlinkSync(file); //用完即删
 			};
 		}, 0);
+
+		setInterval(function(){
+			if ( !fs.existsSync(INPUT) ) //不存在
+				fs.mkdirsSync(INPUT);
+			if ( !fs.existsSync(OUTPUT) ) //不存在
+				fs.mkdirsSync(OUTPUT);
+
+			const outputs = fs.readdirSync(OUTPUT); //所有输出
+			for (const name of outputs){
+				const file = path.join(OUTPUT, name);
+				const stats = fs.statSync(file);
+				console.log(stats.mtime, +new Date(stats.mtime))
+				if (new Date()-new Date(stats.mtime) > 3600*1000){ //1h有效期
+					fs.unlinkSync(file);
+				}
+			}
+		}, 1000);
 	}
 
 	//关闭窗口

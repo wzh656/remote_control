@@ -48,7 +48,7 @@
 //jquery
 window.$ = window.jQuery = require("./js/jquery.min.js");
 
-const ipcRenderer = require("electron").ipcRenderer; //交互通信
+const {ipcRenderer} = require("electron"); //交互通信
 /*ipcRenderer.send("command_file",
 `javascript console.log('hello, world!')
 keyToggle command down
@@ -105,11 +105,16 @@ function runJs(code){
 			};
 			
 
+		}else if (code == "bilibili_recommand"){
+			$.get("http://api.bilibili.cn/recommend", function(data, status, xhr){
+				resolve( JSON.stringify(data) );
+			});
+
 		}else if (code.substr(0,16) == "bilibili_search "){
 			const args = code.split(" "); //keyword
 			$.get(`https://api.bilibili.com/x/web-interface/search/type?keyword=${encodeURIComponent(args[1])}&search_type=video`, function(data, status, xhr){
 				resolve( JSON.stringify(data) );
-			}, args[2]);
+			});
 
 		}else if (code.substr(0,18) == "bilibili_download "){
 			const args = code.split(" "); //BVid path
@@ -121,14 +126,14 @@ function runJs(code){
 				if (cid != undefined){
 					$.get(`https://api.bilibili.com/x/player/playurl?bvid=${encodeURIComponent(args[1])}&cid=${encodeURIComponent(cid)}`, function(data, status, xhr){
 						const url = data?.data?.durl?.[0]?.url;
-						ipcRenderer.send("download", url, args[2]);
+						ipcRenderer.send("download", url, args[2], "https://www.bilibili.com/video/"+args[1]);
 						elecDownloadCallback = resolve;
 					});
 
 				}else{
 					return resolve( JSON.stringify(data) );
 				}
-			}, args[2]);
+			});
 
 		}else if (code.substr(0,7) == "speech "){
 			const audio = new Audio("https://api.vvhan.com/api/song?txt=" + encodeURIComponent(code.substr(7)) );
