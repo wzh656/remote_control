@@ -1,7 +1,8 @@
 const {exec} = require("child_process"); //命令
 const http = require("http"); //服务器&请求
 const https = require("https"); //请求
-const url = require("url"); //解析url
+const URL = require("url"); //解析url
+
 
 http.createServer(function(req, res) {
 	const path = req.url.substr(1);
@@ -11,11 +12,11 @@ http.createServer(function(req, res) {
 	/*const headers = {};
 	for (const [i,v] of Object.entries(req.headers))
 		headers[i] = v;
-	headers.host = url.parse(path).host;
-	console.log(url.parse(path).host)
+	headers.host = URL.parse(path).host;
+	console.log(URL.parse(path).host)
 	console.log(headers)*/
 
-	const parse = url.parse(path);
+	const parse = URL.parse(path);
 	switch (parse.protocol){
 		case "https:":
 			https.get({
@@ -127,8 +128,8 @@ http.createServer(function(req, res) {
 			res.end(
 				body.replace(/http:/g, `http://${req.headers.host}/http:`)
 				.replace(/https:/g, `http://${req.headers.host}/https:`)
-				.replace(/src\=\"\//g, `src=\"http://${req.headers.host}/${url.parse(path).protocol}//${url.parse(path).host}/`)
-				.replace(/href\=\"\//g, `href=\"http://${req.headers.host}/${url.parse(path).protocol}//${url.parse(path).host}/`)
+				.replace(/src\=\"\//g, `src=\"http://${req.headers.host}/${URL.parse(path).protocol}//${URL.parse(path).host}/`)
+				.replace(/href\=\"\//g, `href=\"http://${req.headers.host}/${URL.parse(path).protocol}//${URL.parse(path).host}/`)
 			);
 		}else{
 			res.end(body);

@@ -14,6 +14,18 @@
 			margin: 0;
 			padding: 0;
 		}
+
+		h1{
+			color: #373fff;
+			font-style: italic;
+		}
+
+		#logs > li{
+			/*color: #373fff;*/
+			/*text-decoration: underline;*/
+			border-bottom: 1px solid #373fff;
+		}
+
 		/* state */
 		.state{
 			flex: none;
@@ -43,6 +55,8 @@
 	<body>
 		<p class="state connecting">连接服务器中……</p>
 		<h1>Remote Control</h1>
+		<hr/>
+		<ul id="logs"></ul>
 
 <script>
 //jquery
@@ -58,15 +72,53 @@ keyToggle command up
 javascript console.log("finished")`
 );*/
 
+
+//格式化日期
+Date.prototype.format = function(fmt){
+	const o = {
+		"M+": this.getMonth()+1,					//月份
+		"d+": this.getDate(),						//日
+		"h+": this.getHours(),						//小时
+		"m+": this.getMinutes(),					//分
+		"s+": this.getSeconds(),					//秒
+		"q+": Math.floor((this.getMonth()+3)/3),	//季度
+		"S": this.getMilliseconds()					//毫秒
+	};
+	if ( /(y+)/.test(fmt) )
+		fmt = fmt.replace(RegExp.$1, (this.getFullYear()+"").substr(4 - RegExp.$1.length));
+	for (const k in o)
+		if ( new RegExp("("+ k +")").test(fmt) )
+			fmt = fmt.replace(RegExp.$1, (RegExp.$1.length==1) ? (o[k]) : (("00"+ o[k]).substr((""+ o[k]).length)));
+	return fmt;
+}
+
+
+
 let NAME;
 let ID;
 let controllerID;
 let haveSent = false;
 const socket = io("https://wzh.glitch.me/"); //连接
 function send(name, ...data){
-	console.log("↑", name, data);
+	log("↑", name, data);
 	socket.emit(name, ...data);
 };
+
+
+//日志输出
+function log(...args){
+	console.log(...args);
+	let str = new Date().format("hh-MM-ss.S");
+	for (const arg of args)
+		try{
+			str += JSON.stringify(arg);
+		}catch(err){
+			str += ""+arg;
+		}
+	$("#logs").append(
+		$("<li></li>").html(str)
+	);
+}
 
 
 
@@ -75,7 +127,11 @@ let commandsCallback = ()=>{};
 function runCommands(code){
 	return new Promise((resolve, reject)=>{
 		ipcRenderer.send("commands", code);
-		commandsCallback = resolve;
+		log("runCommands", code);
+		commandsCallback = (...args)=>{
+			log("runCommands_callback", ...args);
+			resolve(...args);
+		};
 	});
 }
 
@@ -85,6 +141,7 @@ let elecReadfileCallback = ()=>{};
 let elecDownloadCallback = ()=>{};
 function runJs(code){
 	return new Promise((resolve, reject)=>{
+		log("runJs", code);
 		if (code.substr(0,8) == "request "){
 			const args = code.split(" "); //网址 dataType
 			$.get(args[1], function(data, status, xhr){
@@ -95,10 +152,12 @@ function runJs(code){
 			const args = code.split(" "); //本地位置 服务器位置
 			ipcRenderer.send("readfile", args[1]);
 			elecReadfileCallback = function(data){
+				log("runJs > upload > elecReadfileCallback", data);
 				$.post("https://wzh.glitch.me/data/writeFile", {
 					path: "RemoteControl/upload/" + args[2],
 					value: data
 				}, function(body, status, xhr){
+					log("runJs > upload > elecReadfileCallback > postCallback", data);
 					resolve(JSON.stringify(body), data);
 				});
 				//resolve(data);
@@ -123,9 +182,11 @@ function runJs(code){
 					return resolve( JSON.stringify(data) );
 
 				const cid = data?.data?.cid;
+				log("runJs > bilibili_download > getCid", data, cid);
 				if (cid != undefined){
 					$.get(`https://api.bilibili.com/x/player/playurl?bvid=${encodeURIComponent(args[1])}&cid=${encodeURIComponent(cid)}`, function(data, status, xhr){
 						const url = data?.data?.durl?.[0]?.url;
+						log("runJs > bilibili_download > getCid > getUrl", url);
 						ipcRenderer.send("download", url, args[2], "https://www.bilibili.com/video/"+args[1]);
 						elecDownloadCallback = resolve;
 					});
@@ -163,7 +224,11 @@ let electronCallback = ()=>{};
 function runElectron(code){
 	return new Promise((resolve, reject)=>{
 		ipcRenderer.send("electron", code);
-		electronCallback = resolve;
+		log("runElectron", code);
+		electronCallback = (...args)=>{
+			log("runElectron_callback", ...args);
+			resolve(...args);
+		};
 	});
 }
 
@@ -185,6 +250,7 @@ if (typeof io == "undefined"){ //未加载socket.io.js
 		}
 		$(".state").html("服务器连接成功")
 			.removeClass().addClass("state success");
+		log("connected");
 	});
 	socket.on("connect_failed", function(data){
 		$(".state").html("服务器连接失败")
@@ -195,6 +261,7 @@ if (typeof io == "undefined"){ //未加载socket.io.js
 		$(".state").html("与服务器连接断开")
 			.removeClass().addClass("state failed");
 		haveSent = false;
+		log("disconnected");
 	});
 	socket.on("reconnecting", function(data){
 		$(".state").html("重连中……")

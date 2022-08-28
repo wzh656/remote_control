@@ -10,11 +10,12 @@ const fs = require("fs"); //文件处理
 const path = require("path"); //路径处理
 const http = require("http"); //服务器&请求
 const https = require("https"); //请求
-const url = require("url"); //解析url
+const URL = require("url"); //解析url
 
 
 
 let win; // 保存窗口对象的全局引用, 如果不这样做, 当JavaScript对象被当做垃圾回收时，window窗口会自动关闭
+let display = true;
 let newWindows = []; //新建的窗口
 let tray = null; //托盘
 
@@ -33,11 +34,11 @@ if (CONFIG.server){
 		/*const headers = {};
 		for (const [i,v] of Object.entries(req.headers))
 			headers[i] = v;
-		headers.host = url.parse(path).host;
-		console.log(url.parse(path).host)
+		headers.host = URL.parse(path).host;
+		console.log(URL.parse(path).host)
 		console.log(headers)*/
 
-		const parse = url.parse(path);
+		const parse = URL.parse(path);
 		switch (parse.protocol){
 			case "https:":
 				https.get({
@@ -149,8 +150,8 @@ if (CONFIG.server){
 				res.end(
 					body.replace(/http:/g, `http://${req.headers.host}/http:`)
 					.replace(/https:/g, `http://${req.headers.host}/https:`)
-					.replace(/src\=\"\//g, `src=\"http://${req.headers.host}/${url.parse(path).protocol}//${url.parse(path).host}/`)
-					.replace(/href\=\"\//g, `href=\"http://${req.headers.host}/${url.parse(path).protocol}//${url.parse(path).host}/`)
+					.replace(/src\=\"\//g, `src=\"http://${req.headers.host}/${URL.parse(path).protocol}//${URL.parse(path).host}/`)
+					.replace(/href\=\"\//g, `href=\"http://${req.headers.host}/${URL.parse(path).protocol}//${URL.parse(path).host}/`)
 				);
 			}else{
 				res.end(body);
@@ -168,6 +169,60 @@ fs.mkdirsSync = function(dirname){
 	fs.mkdirsSync(path.dirname(dirname)); //递归创建上层目录
 	fs.mkdirSync(dirname); //创建本层目录
 };
+
+
+//下载
+function download(url, path, referer=""){
+	return new Promise((resolve, reject)=>{
+		const parse = URL.parse(url);
+		console.log(parse)
+		switch (parse.protocol){
+			case "http:":
+				http.get({
+					hostname: parse.host,
+					port: parse.port,
+					path: parse.path,
+					rejectUnauthorized: false, // 忽略安全警告
+					headers: {
+						"Host": parse.host,
+						"Referer": referer
+					}
+				}, function(result){
+					const file = fs.createWriteStream(path);
+					result.pipe(file);
+					file.on("finish", ()=>{
+						file.close();
+						resolve(true);
+					});
+				}).on("error", reject);
+				break;
+
+			case "https:":
+				https.get({
+					hostname: parse.host,
+					port: parse.port,
+					path: parse.path,
+					rejectUnauthorized: false, // 忽略安全警告
+					headers: {
+						"Host": parse.host,
+						"Referer": referer
+					}
+				}, function(result){
+					const file = fs.createWriteStream(path);
+					result.pipe(file);
+					file.on("finish", ()=>{
+						file.close();
+						resolve(true);
+					});
+				}).on("error", reject);
+				break;
+
+			default:
+				reject("Invalid Protocol");
+				break;
+		}
+	});
+}
 
 
 
@@ -233,8 +288,9 @@ function runElectron(code){
 			resolve( JSON.stringify(newWindows) );
 
 		}else if(code.substr(0,9) == "download "){
-			const args = code.split(" "); //url path
-			const req = request({
+			const args = code.split(" "); //url path referer
+			download(args[1], args.slice(2).join(" ")).then(()=>resolve(true));
+			/*const req = request({
 				method: "GET",
 				uri: args[1]
 			});
@@ -242,7 +298,7 @@ function runElectron(code){
 			req.pipe(out);
 			req.on("end", function(){
 				resolve(true);
-			});
+			});*/
 
 		}else{
 			let result;
@@ -284,9 +340,10 @@ function createWindow(){
 	
 	//win.setProgressBar(0.5); //进度条
 	win.setMenu(null); //隐藏菜单
-	win.loadURL(`file://${__dirname}/index.html`); //加载index.html文件
+	win.loadFile("index.html"); //加载index.html文件
 	win.webContents.openDevTools(); //打开开发工具
 	win.hide(); //隐藏窗口
+	display = false;
 	
 	//托盘
 	if (CONFIG.tray){
@@ -367,6 +424,50 @@ function createWindow(){
 		if (err) console.error(err);
 	});*/
 
+	//状态检测
+	(function (){
+		show = win.show;
+		hide = win.hide; //重写
+		win.show = ()=>{
+			show();
+			display = true;
+		}
+		win.hide = ()=>{
+			hide();
+			display = false;
+		}
+	})();
+	setInterval(()=>{
+		const dir = path.join(process.env.ProgramData, "RemoteControl");
+		if (!fs.existsSync(dir))
+			fs.mkdirsSync(dir);
+		fs.writeFileSync(path.join(dir, "status.dat"), +new Date());
+		fs.writeFileSync(path.join(dir, "display.dat"), display);
+	}, 3*1000);
+	//操作监听
+	setInterval(()=>{
+		const dir = path.join(process.env.ProgramData, "RemoteControl", "control");
+		if (!fs.existsSync(dir))
+			fs.mkdirsSync(dir);
+		
+		const files = fs.readdirSync(dir).sort(); //所有输入
+		if (files.length <= 0) return;
+		
+		for (const name of files){
+			const file = path.join(dir, name);
+			switch ( fs.readFileSync(file).toString() ){
+				case "show":
+					win.show();
+					break;
+				case "hide":
+					win.hide();
+					break;
+			}
+			fs.unlinkSync(file); //用完即删
+		}
+	}, 500);
+
+
 	//请求NAME
 	ipcMain.on("name", function(event){
 		event.sender.send("name", CONFIG.name);
@@ -380,7 +481,13 @@ function createWindow(){
 
 	//download
 	ipcMain.on("download", function(event, url, path, referer){
-		const req = request({
+		download(url, path, referer).then(()=>{
+			event.sender.send("download_output", true);
+		}).catch(err => {
+			console.error(err)
+			event.sender.send("download_error", ""+err);
+		});
+		/*const req = request({
 			method: "GET",
 			uri: url,
 			referer
@@ -389,13 +496,15 @@ function createWindow(){
 		req.pipe(out);
 		req.on("end", function(){
 			event.sender.send("download_output", true);
-		});
+		});*/
 	});
 
 	//运行Electron .elec
 	ipcMain.on("electron", function(event, code){
 		runElectron(code).then((...data)=>{
 			event.sender.send("electron_output", ...data);
+		}).catch(err => {
+			event.sender.send("electron_error", ...data);
 		});
 	});
 
@@ -403,6 +512,8 @@ function createWindow(){
 	ipcMain.on("commands", function(event, code){
 		runCommands(code).then((...data)=>{
 			event.sender.send("commands_output", ...data);
+		}).catch(err => {
+			event.sender.send("commands_error", ...data);
 		});
 	});
 
@@ -412,63 +523,75 @@ function createWindow(){
 	});
 
 	/* 本地控制 */
-	if (CONFIG.local_path){
-		const INPUT = path.join(CONFIG.local_path, "input");
-		const OUTPUT = path.join(CONFIG.local_path, "output");
+	if (CONFIG.local_path)
+		setTimeout(()=>{
+			const INPUT = path.join(CONFIG.local_path, "input");
+			const OUTPUT = path.join(CONFIG.local_path, "output");
 
-		setInterval(function(){
-			if ( !fs.existsSync(INPUT) ) //不存在
-				fs.mkdirsSync(INPUT);
-			if ( !fs.existsSync(OUTPUT) ) //不存在
-				fs.mkdirsSync(OUTPUT);
+			//获取输入命令
+			setInterval(function(){
+				if ( !fs.existsSync(INPUT) ) //不存在
+					fs.mkdirsSync(INPUT);
+				if ( !fs.existsSync(OUTPUT) ) //不存在
+					fs.mkdirsSync(OUTPUT);
 
-			const inputs = fs.readdirSync(INPUT).sort(); //所有输入
-			if (inputs.length)
-				console.log(inputs)
+				const inputs = fs.readdirSync(INPUT).sort(); //所有输入
+				if (inputs.length)
+					console.log(inputs)
 
-			for (const name of inputs){
-				const type = name.split(".").slice(-1)[0]; //后缀类型
-				const file = path.join(INPUT, name);
-				switch (type){
-					case "cmd":
-						runCommands( fs.readFileSync(file).toString() ).then((...data)=>{
-							fs.writeFileSync(path.join(OUTPUT, name+".cb"), JSON.stringify(data));
-						});
-						break;
-					case "js":
-						runJs( fs.readFileSync(file).toString() ).then((...data)=>{
-							fs.writeFileSync(path.join(OUTPUT, name+".cb"), JSON.stringify(data));
-						});
-						break;
-					case "elec":
-						runElectron( fs.readFileSync(file).toString() ).then((...data)=>{
-							fs.writeFileSync(path.join(OUTPUT, name+".cb"), JSON.stringify(data));
-						});
-						break;
-					default:
-						fs.writeFileSync(path.join(OUTPUT, name+".cb"), "Invalid Type: " + type);
+				for (const name of inputs){
+					const type = name.split(".").slice(-1)[0]; //后缀类型
+					const file = path.join(INPUT, name);
+					switch (type){
+						case "cmd":
+							runCommands( fs.readFileSync(file).toString() ).then((...data)=>{
+								fs.writeFileSync(path.join(OUTPUT, name+".cb"), data);
+							}).catch(err => {
+								fs.writeFileSync(path.join(OUTPUT, name+".cb"), "[ERROR]"+err);
+							});
+							break;
+
+						case "js":
+							runJs( fs.readFileSync(file).toString() ).then((...data)=>{
+								fs.writeFileSync(path.join(OUTPUT, name+".cb"), JSON.stringify(data));
+							}).catch(err => {
+								fs.writeFileSync(path.join(OUTPUT, name+".cb"), "[ERROR]"+err);
+							});
+							break;
+
+						case "elec":
+							runElectron( fs.readFileSync(file).toString() ).then((...data)=>{
+								fs.writeFileSync(path.join(OUTPUT, name+".cb"), JSON.stringify(data));
+							}).catch(err => {
+								fs.writeFileSync(path.join(OUTPUT, name+".cb"), "[ERROR]"+err);
+							});
+							break;
+
+						default:
+							fs.writeFileSync(path.join(OUTPUT, name+".cb"), "Invalid Type: " + type);
+					}
+					fs.unlinkSync(file); //用完即删
+				};
+			}, 0);
+
+			//删除超时文件
+			setInterval(function(){
+				if ( !fs.existsSync(INPUT) ) //不存在
+					fs.mkdirsSync(INPUT);
+				if ( !fs.existsSync(OUTPUT) ) //不存在
+					fs.mkdirsSync(OUTPUT);
+
+				const outputs = fs.readdirSync(OUTPUT); //所有输出
+				for (const name of outputs){
+					const file = path.join(OUTPUT, name);
+					const stats = fs.statSync(file);
+					console.log(stats.mtime, +new Date(stats.mtime))
+					if (new Date()-new Date(stats.mtime) > 3600*1000){ //1h有效期
+						fs.unlinkSync(file);
+					}
 				}
-				fs.unlinkSync(file); //用完即删
-			};
-		}, 0);
-
-		setInterval(function(){
-			if ( !fs.existsSync(INPUT) ) //不存在
-				fs.mkdirsSync(INPUT);
-			if ( !fs.existsSync(OUTPUT) ) //不存在
-				fs.mkdirsSync(OUTPUT);
-
-			const outputs = fs.readdirSync(OUTPUT); //所有输出
-			for (const name of outputs){
-				const file = path.join(OUTPUT, name);
-				const stats = fs.statSync(file);
-				console.log(stats.mtime, +new Date(stats.mtime))
-				if (new Date()-new Date(stats.mtime) > 3600*1000){ //1h有效期
-					fs.unlinkSync(file);
-				}
-			}
-		}, 1000);
-	}
+			}, 1000);
+		}, 5000); //内网连接延时
 
 	//关闭窗口
 	win.on("closed", () => {
